@@ -2,7 +2,7 @@ export function getCurrentWeekDates(): string[] {
     const today = new Date();
     const currentDay = today.getDay();
 
-    const distanceToMonday = currentDay === 0 ? -6 : 1 - currentDay;
+    const distanceToMonday = currentDay === 0 ? -5 : 2 - currentDay;
 
     const monday = new Date(today.setDate(today.getDate() + distanceToMonday));
     const dates: string[] = [];
