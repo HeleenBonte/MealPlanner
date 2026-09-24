@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, Modal, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { COLORS, globalStyles } from '../styles/theme';
 import { addNewMealToLibrary, fetchGlobalCarbs, fetchGlobalVegetables, GlobalSideItem } from '../database/dbQueries';
@@ -86,6 +86,10 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
 
     return (
     <Modal visible={isOpen} animationType="slide" transparent={true} onRequestClose={onClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+        >
       <View style={[styles.modalOverlay, { marginBottom: 60 +insets.bottom }]}>
         <View style={styles.modalContentCard}>
           
@@ -157,6 +161,7 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
           )}
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

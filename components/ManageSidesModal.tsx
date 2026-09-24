@@ -1,6 +1,6 @@
 // components/ManageSidesModal.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { globalStyles, COLORS } from '../styles/theme';
@@ -68,6 +68,10 @@ export default function ManageSidesModal({ isOpen, onClose }: ManageSidesModalPr
 
   return (
     <Modal visible={isOpen} animationType="slide" transparent={true} onRequestClose={onClose}>
+      <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      style={{ flex: 1 }}
+    >
       <View style={[styles.modalOverlay, { marginBottom: 60 + insets.bottom }]}>
         <View style={styles.modalContentCard}>
           
@@ -123,6 +127,7 @@ export default function ManageSidesModal({ isOpen, onClose }: ManageSidesModalPr
           )}
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
