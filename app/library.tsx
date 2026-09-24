@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { useIsFocused } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -6,12 +6,15 @@ import { globalStyles, COLORS } from '../styles/theme';
 
 import { fetchAllMealsFromLibrary, deleteMealFromLibrary, LibraryMealRow } from '../database/dbQueries';
 
+import AddMealModal from '../components/AddMealModal';
+
 export default function LibraryScreen() {
     const db = useSQLiteContext();
     const isFocused = useIsFocused(); 
 
     const [meals, setMeals] = useState<LibraryMealRow[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [isModalOpen, setIsModalOpen] = useState(false);
 
     const loadMeals = useCallback(async () => {
         try {
@@ -26,7 +29,7 @@ export default function LibraryScreen() {
         }
     }, [db]);
 
-    React.useEffect(() => {
+    useEffect(() => {
         if (isFocused) {
             loadMeals();
         }
@@ -86,7 +89,7 @@ export default function LibraryScreen() {
         <Text style={globalStyles.headerTitle}>Recipe Library</Text>
         
         {/* We will wire this button up to open our Add Meal overlay panel form next! */}
-        <TouchableOpacity style={styles.addButton} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.addButton} onPress={() => setIsModalOpen(true)} activeOpacity={0.8}>
           <Text style={styles.addButtonText}>+ Add Meal</Text>
         </TouchableOpacity>
       </View>
@@ -134,6 +137,15 @@ export default function LibraryScreen() {
           </View>
         )}
       />
+      <AddMealModal
+      isOpen={isModalOpen}
+      onClose={() => setIsModalOpen(false)}
+      onSaveSuccess={() => {
+        setIsModalOpen(false);
+                loadMeals();
+
+      }} // Refresh the library after adding a new meal
+    />
     </View>
   );
 }
