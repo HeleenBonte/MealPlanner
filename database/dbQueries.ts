@@ -1,0 +1,311 @@
+import { SQLiteDatabase } from 'expo-sqlite';
+import { MealCategory } from '../constants/categories';
+
+// weekly schedule interface
+export interface ScheduledDay {
+    date: string;
+    dayName: string;
+    mealId: number | null;
+    widget_display_string: string;
+}
+
+interface DBMeal {
+    id: number;
+    name: string;
+    category: MealCategory | null;
+}
+
+interface DBRule {
+    day_index: number;
+    day_name: string;
+    required_category: MealCategory | null;
+    fixed_meal_name: string | null;
+}
+
+// Payload for adding a new meal to the database
+export interface NewMealPayload {
+    name: string;
+    category: string | null;
+    carbIds: number[];
+    vegIds: number[];
+}
+
+// Payload for editing an existing meal in the database
+export interface EditMealPayload {
+    id: number;
+    name: string;
+    category: string | null;
+    carbIds: number[];
+    vegIds: number[];
+}
+
+// payload for new side dishes
+export interface GlobalSideItem {
+    id: number;
+    name: string;
+}
+
+// payload for editing dayrules
+export interface UpdateDayRule {
+    day_index: number;
+    required_category: MealCategory | null;
+    fixed_meal_name: string | null;
+}
+
+// Function to generate a weekly schedule based on the provided start dates
+export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: string[]): Promise<void> {
+    await db.withTransactionAsync(async () => {
+        await clearOldSchedules(db);
+
+        const rules = await db.getAllAsync<DBRule>('SELECT * FROM weekday_rules ORDER BY day_index ASC;');
+
+        const chosenMealIdsThisSession: number[] = [];
+
+        for (const targetDate of startDates) {
+
+            const currentDayIndex = new Date(targetDate).getDay();
+
+            const dayRule = rules.find(r => r.day_index === currentDayIndex);
+
+            if (dayRule) {
+                if (dayRule.fixed_meal_name) {
+                    await db.runAsync(
+                        `INSERT OR REPLACE INTO scheduled_days (date, meal_id, selected_carb, selected_veg, widget_display_string) 
+                    VALUES (?, -1, NULL, NULL, ?);`,
+                        [targetDate, dayRule.fixed_meal_name]
+                    );
+                    continue;
+                }
+            }
+
+            let candidateMeals = await getCandidateMeals(db, targetDate, dayRule, chosenMealIdsThisSession);
+
+            if (candidateMeals.length === 0) {
+                await db.runAsync(
+                    `INSERT OR REPLACE INTO scheduled_days (date, meal_id, selected_carb, selected_veg, widget_display_string) 
+                    VALUES (?, NULL, NULL, NULL, 'No meal available');`,
+                    [targetDate, 'No Meals Found (Add more to Library)']
+                );
+                continue;
+            }
+
+            const selectedMeal = selectRandomMeal(candidateMeals);
+
+            chosenMealIdsThisSession.push(selectedMeal.id);
+
+            const chosenCarb = await selectRandomCarb(db, selectedMeal.id);
+            const chosenVeg = await selectRandomVegetable(db, selectedMeal.id);
+
+            const displayString = compileWidgetDisplayString(selectedMeal.name, chosenCarb, chosenVeg);
+
+            await db.runAsync(
+                `INSERT OR REPLACE INTO scheduled_days (date, meal_id, selected_carb, selected_veg, widget_display_string) 
+                VALUES (?, ?, ?, ?, ?);`,
+                [targetDate, selectedMeal.id, chosenCarb, chosenVeg, displayString]
+            );
+        }
+    });
+}
+
+async function clearOldSchedules(db: SQLiteDatabase): Promise<void> {
+    try {
+        await db.runAsync('DELETE FROM scheduled_days WHERE date < date("now", "-60 days");');
+    } catch (error) {
+        console.error('Error clearing old schedules:', error);
+    }
+}
+
+
+async function getCandidateMeals(db: SQLiteDatabase, targetDate: string, dayRule: DBRule | undefined, chosenMealIdsThisSession: number[]): Promise<DBMeal[]> {
+
+    let baseQuery = `
+            SELECT id, name, category FROM meals 
+            WHERE (last_cooked IS NULL OR last_cooked < date(?, '-14 days'))
+            `;
+
+    const queryParams: any[] = [targetDate];
+
+    if (dayRule && dayRule.required_category) {
+        baseQuery += ` AND category = ?`;
+        queryParams.push(dayRule.required_category);
+    }
+
+    const queryResults = await db.getAllAsync<DBMeal>(baseQuery, queryParams);
+
+    let candidateMeals = queryResults.filter(meal => !chosenMealIdsThisSession.includes(meal.id));
+
+    if (candidateMeals.length === 0) {
+        let fallbackQuery = `SELECT id, name, category FROM meals`;
+        const fallbackParams: any[] = [];
+
+        if (dayRule && dayRule.required_category) {
+            fallbackQuery += ` WHERE category = ?`;
+            fallbackParams.push(dayRule.required_category);
+        }
+
+        const fallbackResults = await db.getAllAsync<DBMeal>(fallbackQuery, fallbackParams);
+        candidateMeals = fallbackResults.filter(meal => !chosenMealIdsThisSession.includes(meal.id));
+    }
+
+
+    return candidateMeals;
+}
+
+function selectRandomMeal(meals: DBMeal[]): DBMeal {
+    const randomIndex = Math.floor(Math.random() * meals.length);
+    return meals[randomIndex];
+}
+
+async function selectRandomCarb(db: SQLiteDatabase, mealId: number): Promise<string | null> {
+    const carbs = await db.getAllAsync<{ carb_name: string }>(
+        `SELECT c.carb_name 
+                FROM global_carbs c
+                JOIN meal_carbs_link m ON m.carb_id = c.id
+                WHERE m.meal_id = ?;`,
+        [mealId]
+    );
+    return carbs.length > 0 ? carbs[Math.floor(Math.random() * carbs.length)].carb_name : null;
+}
+
+async function selectRandomVegetable(db: SQLiteDatabase, mealId: number): Promise<string | null> {
+    const veggies = await db.getAllAsync<{ veg_name: string }>(
+        `SELECT v.veg_name 
+        FROM global_vegetables v
+        JOIN meal_vegetables_link m ON m.veg_id = v.id
+        WHERE m.meal_id = ?;`,
+        [mealId]
+    );
+    return veggies.length > 0 ? veggies[Math.floor(Math.random() * veggies.length)].veg_name : null;
+}
+
+function compileWidgetDisplayString(mealName: string, carb: string | null, veg: string | null): string {
+    const attachments: string[] = [];
+    if (carb) attachments.push(carb);
+    if (veg) attachments.push(veg);
+    if (attachments.length === 2) {
+        return `${mealName} with ${attachments[0]} and ${attachments[1]}`;
+    } else if (attachments.length === 1) {
+        return `${mealName} with ${attachments[0]}`;
+    } else {
+        return mealName;
+    }
+}
+
+// Function to add a new meal to the database
+export async function addNewMealToLibrary(db: SQLiteDatabase, meal: NewMealPayload): Promise<void> {
+    await db.withTransactionAsync(async () => {
+
+        const mealResult = await db.runAsync(
+            `INSERT INTO meals (name, category) VALUES (?, ?);`,
+            [meal.name, meal.category]
+        );
+
+        const mealId = mealResult.lastInsertRowId;
+
+        if (meal.carbIds && meal.carbIds.length > 0) {
+            for (const carbId of meal.carbIds) {
+                await db.runAsync(
+                    `INSERT OR IGNORE INTO meal_carbs_link (meal_id, carb_id) VALUES (?, ?);`,
+                    [mealId, carbId]
+                );
+            }
+        }
+
+        if (meal.vegIds && meal.vegIds.length > 0) {
+            for (const vegId of meal.vegIds) {
+                await db.runAsync(
+                    `INSERT OR IGNORE INTO meal_vegetables_link (meal_id, veg_id) VALUES (?, ?);`,
+                    [mealId, vegId]
+                );
+            }
+        }
+    });
+}
+
+// Function to edit an existing meal in the database
+export async function editMealInLibrary(db: SQLiteDatabase, meal: EditMealPayload): Promise<void> {
+    await db.withTransactionAsync(async () => {
+        try {
+            await db.runAsync(
+                `UPDATE meals SET name = ?, category = ? WHERE id = ?;`,
+                [meal.name, meal.category, meal.id]
+            );
+
+            await db.runAsync(
+                `DELETE FROM meal_carbs_link WHERE meal_id = ?;`,
+                [meal.id]
+            );
+            if (meal.carbIds && meal.carbIds.length > 0) {
+                for (const carbId of meal.carbIds) {
+                    await db.runAsync(
+                        `INSERT OR IGNORE INTO meal_carbs_link (meal_id, carb_id) VALUES (?, ?);`,
+                        [meal.id, carbId]
+                    );
+                }
+            }
+            await db.runAsync(
+                `DELETE FROM meal_vegetables_link WHERE meal_id = ?;`,
+                [meal.id]
+            );
+            if (meal.vegIds && meal.vegIds.length > 0) {
+                for (const vegId of meal.vegIds) {
+                    await db.runAsync(
+                        `INSERT OR IGNORE INTO meal_vegetables_link (meal_id, veg_id) VALUES (?, ?);`,
+                        [meal.id, vegId]
+                    );
+                }
+            }
+            console.log(`Meal with ID ${meal.id} (${meal.name}) updated successfully.`);
+        } catch (error) {
+            console.error('Error updating meal:', error);
+            throw error;
+        }
+    });
+}
+
+// Functions to fetch and add sides
+export async function fetchGlobalCarbs(db: SQLiteDatabase): Promise<GlobalSideItem[]> {
+    return await db.getAllAsync<GlobalSideItem>(
+        `SELECT id, carb_name as name FROM global_carbs ORDER BY carb_name ASC;`);
+}
+
+export async function fetchGlobalVegetables(db: SQLiteDatabase): Promise<GlobalSideItem[]> {
+    return await db.getAllAsync<GlobalSideItem>(
+        `SELECT id, veg_name as name FROM global_vegetables ORDER BY veg_name ASC;`);
+}
+
+export async function addGlobalCarb(db: SQLiteDatabase, carbName: string): Promise<void> {
+    const trimmedName = carbName.trim();
+    if (trimmedName) {
+        await db.runAsync(
+            `INSERT OR IGNORE INTO global_carbs (carb_name) VALUES (?);`,
+            [trimmedName]
+        );
+    }
+}
+
+export async function addGlobalVegetable(db: SQLiteDatabase, vegName: string): Promise<void> {
+    const trimmedName = vegName.trim();
+    if (trimmedName) {
+        await db.runAsync(
+            `INSERT OR IGNORE INTO global_vegetables (veg_name) VALUES (?);`,
+            [trimmedName]
+        );
+    }
+}
+
+// Function to update a weekday rule in the database
+export async function updateWeekdayRule(db: SQLiteDatabase, rule: UpdateDayRule): Promise<void> {
+    try {
+        await db.runAsync(
+            `UPDATE weekday_rules 
+             SET required_category = ?, fixed_meal_name = ? 
+             WHERE day_index = ?;`,
+            [rule.required_category, rule.fixed_meal_name, rule.day_index]
+        );
+        console.log(`Weekday rule for day_index ${rule.day_index} updated successfully.`);
+    } catch (error) {
+        console.error('Error updating weekday rule:', error);
+        throw error;
+    }
+}
