@@ -6,10 +6,12 @@ import { globalStyles, COLORS } from '../styles/theme';
 
 // Import our new isolated dictionary configuration modal component!
 import ManageSidesModal from '../components/ManageSidesModal';
+import EditRulesModal from '../components/EditRulesModal';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const [isSidesModalOpen, setIsSidesModalOpen] = useState(false);
+  const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
 
   return (
     <ScrollView 
@@ -44,11 +46,18 @@ export default function SettingsScreen() {
       {/* --- SECTION 2: WEEKDAY THEME RULES PLANNER --- */}
       <View style={styles.sectionCard}>
         <Text style={styles.sectionHeaderTitle}>📅 Weekday Constraints & Rules</Text>
-        <Text style={styles.sectionSubtitleText}>Configure specific dinner parameters for your calendar slots.</Text>
+        <Text style={styles.sectionSubtitleText}>Lock structural requirements or static overrides to automated days.</Text>
         
-        <View style={styles.placeholderRulesList}>
-          <Text style={styles.placeholderRulesText}>⚙️ Advanced rule scheduling tools ready to link.</Text>
-        </View>
+        <TouchableOpacity style={styles.settingsMenuCell} onPress={() => setIsRulesModalOpen(true)} activeOpacity={0.7}>
+          <View style={styles.cellLeftInfo}>
+            <Text style={{ fontSize: 18 }}>🗓️</Text>
+            <View>
+              <Text style={styles.cellMainLabelText}>Edit Automated Rules</Text>
+              <Text style={styles.cellSubLabelText}>Configure themes or specific fixed dinners per day.</Text>
+            </View>
+          </View>
+          <Text style={styles.arrowIconText}>›</Text>
+        </TouchableOpacity>
       </View>
 
       {/* INJECT THE HIDDEN MODAL CARDS SHEETS */}
@@ -56,6 +65,8 @@ export default function SettingsScreen() {
         isOpen={isSidesModalOpen}
         onClose={() => setIsSidesModalOpen(false)}
       />
+
+      <EditRulesModal isOpen={isRulesModalOpen} onClose={() => setIsRulesModalOpen(false)} />
 
     </ScrollView>
   );

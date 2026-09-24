@@ -1,7 +1,6 @@
 import { SQLiteDatabase } from 'expo-sqlite';
 import { MealCategory } from '../constants/categories';
 
-// weekly schedule interface
 export interface ScheduledDay {
     date: string;
     dayName: string;
@@ -15,14 +14,13 @@ interface DBMeal {
     category: MealCategory | null;
 }
 
-interface DBRule {
+export interface DBRule {
     day_index: number;
     day_name: string;
-    required_category: MealCategory | null;
+    required_category: string | null;
     fixed_meal_name: string | null;
 }
 
-// Payload for adding a new meal to the database
 export interface NewMealPayload {
     name: string;
     category: string | null;
@@ -30,7 +28,6 @@ export interface NewMealPayload {
     vegIds: number[];
 }
 
-// Payload for editing an existing meal in the database
 export interface EditMealPayload {
     id: number;
     name: string;
@@ -39,16 +36,14 @@ export interface EditMealPayload {
     vegIds: number[];
 }
 
-// payload for new side dishes
 export interface GlobalSideItem {
     id: number;
     name: string;
 }
 
-// payload for editing dayrules
 export interface UpdateDayRule {
     day_index: number;
-    required_category: MealCategory | null;
+    required_category: string | null;
     fixed_meal_name: string | null;
 }
 
@@ -60,7 +55,6 @@ export interface LibraryMealRow {
     carbs_list: string | null;
     veggies_list: string | null;
 }
-// Function to generate a weekly schedule based on the provided start dates
 export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: string[]): Promise<void> {
     await db.withTransactionAsync(async () => {
         await clearOldSchedules(db);
@@ -122,7 +116,6 @@ async function clearOldSchedules(db: SQLiteDatabase): Promise<void> {
         console.error('Error clearing old schedules:', error);
     }
 }
-
 
 async function getCandidateMeals(db: SQLiteDatabase, targetDate: string, dayRule: DBRule | undefined, chosenMealIdsThisSession: number[]): Promise<DBMeal[]> {
 
@@ -199,7 +192,6 @@ function compileWidgetDisplayString(mealName: string, carb: string | null, veg: 
     }
 }
 
-// Function to add a new meal to the database
 export async function addNewMealToLibrary(db: SQLiteDatabase, meal: NewMealPayload): Promise<void> {
     await db.withTransactionAsync(async () => {
 
@@ -230,7 +222,6 @@ export async function addNewMealToLibrary(db: SQLiteDatabase, meal: NewMealPaylo
     });
 }
 
-// Function to edit an existing meal in the database
 export async function editMealInLibrary(db: SQLiteDatabase, meal: EditMealPayload): Promise<void> {
     await db.withTransactionAsync(async () => {
         try {
@@ -271,7 +262,6 @@ export async function editMealInLibrary(db: SQLiteDatabase, meal: EditMealPayloa
     });
 }
 
-// Functions to fetch and add sides
 export async function fetchGlobalCarbs(db: SQLiteDatabase): Promise<GlobalSideItem[]> {
     return await db.getAllAsync<GlobalSideItem>(
         `SELECT id, carb_name as name FROM global_carbs ORDER BY carb_name ASC;`);
@@ -302,7 +292,6 @@ export async function addGlobalVegetable(db: SQLiteDatabase, vegName: string): P
     }
 }
 
-// Function to update a weekday rule in the database
 export async function updateWeekdayRule(db: SQLiteDatabase, rule: UpdateDayRule): Promise<void> {
     try {
         await db.runAsync(
@@ -335,4 +324,9 @@ export async function fetchAllMealsFromLibrary(db: SQLiteDatabase): Promise<Libr
 
 export async function deleteMealFromLibrary(db: SQLiteDatabase, mealId: number): Promise<void> {
     await db.runAsync(`DELETE FROM meals WHERE id = ?;`, [mealId]);
+}
+
+export async function fetchAllWeekdayRules(db: SQLiteDatabase): Promise<DBRule[]> {
+    return await db.getAllAsync<DBRule>(
+        `SELECT day_index, day_name, required_category, fixed_meal_name FROM weekday_rules ORDER BY day_index ASC;`);
 }
