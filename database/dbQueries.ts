@@ -52,6 +52,14 @@ export interface UpdateDayRule {
     fixed_meal_name: string | null;
 }
 
+export interface LibraryMealRow {
+    id: number;
+    name: string;
+    category: string | null;
+    last_cooked: string | null;
+    carbs_list: string | null;
+    veggies_list: string | null;
+}
 // Function to generate a weekly schedule based on the provided start dates
 export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: string[]): Promise<void> {
     await db.withTransactionAsync(async () => {
@@ -308,4 +316,23 @@ export async function updateWeekdayRule(db: SQLiteDatabase, rule: UpdateDayRule)
         console.error('Error updating weekday rule:', error);
         throw error;
     }
+}
+
+export async function fetchAllMealsFromLibrary(db: SQLiteDatabase): Promise<LibraryMealRow[]> {
+    return await db.getAllAsync<LibraryMealRow>(`
+        SELECT m.id, m.name, m.category, m.last_cooked,
+            GROUP_CONCAT(DISTINCT c.carb_name) AS carbs_list,
+            GROUP_CONCAT(DISTINCT v.veg_name) AS veggies_list
+        FROM meals m
+        LEFT JOIN meal_carbs_link mcl ON m.id = mcl.meal_id
+        LEFT JOIN global_carbs c ON mcl.carb_id = c.id
+        LEFT JOIN meal_vegetables_link mvl ON m.id = mvl.meal_id
+        LEFT JOIN global_vegetables v ON mvl.veg_id = v.id
+        GROUP BY m.id
+        ORDER BY m.name ASC;`
+    );
+}
+
+export async function deleteMealFromLibrary(db: SQLiteDatabase, mealId: number): Promise<void> {
+    await db.runAsync(`DELETE FROM meals WHERE id = ?;`, [mealId]);
 }
