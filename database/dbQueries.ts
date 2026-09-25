@@ -1,5 +1,5 @@
 import { SQLiteDatabase } from 'expo-sqlite';
-import { MealCategory } from '../constants/categories';
+import { getWeekdayIndex } from '../utils/dateHelpers';
 
 export interface ScheduledDay {
     date: string;
@@ -11,7 +11,7 @@ export interface ScheduledDay {
 interface DBMeal {
     id: number;
     name: string;
-    category: MealCategory | null;
+    category: string | null;
 }
 
 export interface DBRule {
@@ -55,6 +55,18 @@ export interface LibraryMealRow {
     carbs_list: string | null;
     veggies_list: string | null;
 }
+
+export interface CategoryItem {
+    name: string;
+}
+
+export interface MealEditData {
+    id: number;
+    name: string;
+    category: string | null;
+    carbIds: number[];
+    vegIds: number[];
+}
 export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: string[]): Promise<void> {
     await db.withTransactionAsync(async () => {
         await clearOldSchedules(db);
@@ -65,7 +77,7 @@ export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: str
 
         for (const targetDate of startDates) {
 
-            const currentDayIndex = new Date(targetDate).getDay();
+            const currentDayIndex = getWeekdayIndex(targetDate);
 
             const dayRule = rules.find(r => r.day_index === currentDayIndex);
 
@@ -241,6 +253,7 @@ export async function editMealInLibrary(db: SQLiteDatabase, meal: EditMealPayloa
                         [meal.id, carbId]
                     );
                 }
+
             }
             await db.runAsync(
                 `DELETE FROM meal_vegetables_link WHERE meal_id = ?;`,
@@ -262,9 +275,33 @@ export async function editMealInLibrary(db: SQLiteDatabase, meal: EditMealPayloa
     });
 }
 
+export async function fetchMealForEdit(db: SQLiteDatabase, mealId: number): Promise<MealEditData | null> {
+    const meal = await db.getFirstAsync<{ id: number; name: string; category: string | null }>(
+        `SELECT id, name, category FROM meals WHERE id = ?;`,
+        [mealId]
+    );
+
+    if (!meal) return null;
+
+    const carbs = await db.getAllAsync<{ id: number }>(
+        `SELECT carb_id AS id FROM meal_carbs_link WHERE meal_id = ?;`,
+        [mealId]
+    );
+    const vegetables = await db.getAllAsync<{ id: number }>(
+        `SELECT veg_id AS id FROM meal_vegetables_link WHERE meal_id = ?;`,
+        [mealId]
+    );
+
+    return {
+        ...meal,
+        carbIds: carbs.map(item => item.id),
+        vegIds: vegetables.map(item => item.id),
+    };
+}
+
 export async function fetchGlobalCarbs(db: SQLiteDatabase): Promise<GlobalSideItem[]> {
     return await db.getAllAsync<GlobalSideItem>(
-        `SELECT id, carb_name as name FROM global_carbs ORDER BY carb_name ASC;`);
+        `SELECT id, carb_name AS name FROM global_carbs ORDER BY carb_name ASC;`);
 }
 
 export async function fetchGlobalVegetables(db: SQLiteDatabase): Promise<GlobalSideItem[]> {
@@ -272,24 +309,66 @@ export async function fetchGlobalVegetables(db: SQLiteDatabase): Promise<GlobalS
         `SELECT id, veg_name as name FROM global_vegetables ORDER BY veg_name ASC;`);
 }
 
+export async function fetchCategories(db: SQLiteDatabase): Promise<CategoryItem[]> {
+    return await db.getAllAsync<CategoryItem>(
+        `SELECT name FROM categories ORDER BY name ASC;`
+    );
+}
+
+export async function addCategory(db: SQLiteDatabase, categoryName: string): Promise<void> {
+    const normalizedName = categoryName.trim().toLowerCase();
+    if (!normalizedName) return;
+
+    await db.runAsync(
+        `INSERT OR IGNORE INTO categories (name) VALUES (?);`,
+        [normalizedName]
+    );
+}
+
+export async function deleteCategory(db: SQLiteDatabase, categoryName: string): Promise<void> {
+    await db.withTransactionAsync(async () => {
+        await db.runAsync(`UPDATE meals SET category = NULL WHERE category = ?;`, [categoryName]);
+        await db.runAsync(`UPDATE weekday_rules SET required_category = NULL WHERE required_category = ?;`, [categoryName]);
+        await db.runAsync(`DELETE FROM categories WHERE name = ?;`, [categoryName]);
+    });
+}
+
 export async function addGlobalCarb(db: SQLiteDatabase, carbName: string): Promise<void> {
     const trimmedName = carbName.trim();
     if (trimmedName) {
-        await db.runAsync(
+        const result = await db.runAsync(
             `INSERT OR IGNORE INTO global_carbs (carb_name) VALUES (?);`,
             [trimmedName]
         );
+        console.log(`Carb "${trimmedName}" saved with ${result.changes} database change(s).`);
     }
 }
 
 export async function addGlobalVegetable(db: SQLiteDatabase, vegName: string): Promise<void> {
     const trimmedName = vegName.trim();
     if (trimmedName) {
-        await db.runAsync(
+        const result = await db.runAsync(
             `INSERT OR IGNORE INTO global_vegetables (veg_name) VALUES (?);`,
             [trimmedName]
         );
+        console.log(`Vegetable "${trimmedName}" saved with ${result.changes} database change(s).`);
     }
+}
+
+export async function deleteGlobalCarb(db: SQLiteDatabase, carbId: number): Promise<void> {
+    const result = await db.runAsync(
+        `DELETE FROM global_carbs WHERE id = ?;`,
+        [carbId]
+    );
+    console.log(`Carb with ID ${carbId} deleted with ${result.changes} database change(s).`);
+}
+
+export async function deleteGlobalVegetable(db: SQLiteDatabase, vegetableId: number): Promise<void> {
+    const result = await db.runAsync(
+        `DELETE FROM global_vegetables WHERE id = ?;`,
+        [vegetableId]
+    );
+    console.log(`Vegetable with ID ${vegetableId} deleted with ${result.changes} database change(s).`);
 }
 
 export async function updateWeekdayRule(db: SQLiteDatabase, rule: UpdateDayRule): Promise<void> {

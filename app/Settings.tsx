@@ -2,15 +2,17 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { globalStyles, COLORS } from '../styles/theme';
+import { COLORS } from '../styles/theme';
 
 // Import our new isolated dictionary configuration modal component!
 import ManageSidesModal from '../components/ManageSidesModal';
+import ManageCategoriesModal from '../components/ManageCategoriesModal';
 import EditRulesModal from '../components/EditRulesModal';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const [isSidesModalOpen, setIsSidesModalOpen] = useState(false);
+  const [isCategoriesModalOpen, setIsCategoriesModalOpen] = useState(false);
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
 
   return (
@@ -19,8 +21,6 @@ export default function SettingsScreen() {
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{ paddingBottom: 40 + insets.bottom }}
     >
-      <Text style={globalStyles.headerTitle}>App Settings</Text>
-
       {/* --- CONFIGURATION ROW CELL LISTS --- */}
       <View style={styles.sectionCard}>
         <Text style={styles.sectionHeaderTitle}>📋 Ingredient Management</Text>
@@ -39,7 +39,22 @@ export default function SettingsScreen() {
               <Text style={styles.cellSubLabelText}>Manage global pools of carbs and vegetables.</Text>
             </View>
           </View>
-          <Text style={styles.arrowIconText}>›</Text>
+          <Text style={[styles.arrowIconText, { color: COLORS.accentGreen }]}>›</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.settingsMenuCell, styles.categoriesMenuCell, { marginTop: 8 }]}
+          onPress={() => setIsCategoriesModalOpen(true)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.cellLeftInfo}>
+            <Text style={{ fontSize: 18 }}>🏷️</Text>
+            <View>
+              <Text style={styles.cellMainLabelText}>Edit Meal Categories</Text>
+              <Text style={styles.cellSubLabelText}>Manage the categories available across the app.</Text>
+            </View>
+          </View>
+          <Text style={[styles.arrowIconText, { color: COLORS.accentBlue }]}>›</Text>
         </TouchableOpacity>
       </View>
 
@@ -48,7 +63,7 @@ export default function SettingsScreen() {
         <Text style={styles.sectionHeaderTitle}>📅 Weekday Constraints & Rules</Text>
         <Text style={styles.sectionSubtitleText}>Lock structural requirements or static overrides to automated days.</Text>
         
-        <TouchableOpacity style={styles.settingsMenuCell} onPress={() => setIsRulesModalOpen(true)} activeOpacity={0.7}>
+        <TouchableOpacity style={[styles.settingsMenuCell, styles.rulesMenuCell]} onPress={() => setIsRulesModalOpen(true)} activeOpacity={0.7}>
           <View style={styles.cellLeftInfo}>
             <Text style={{ fontSize: 18 }}>🗓️</Text>
             <View>
@@ -56,7 +71,7 @@ export default function SettingsScreen() {
               <Text style={styles.cellSubLabelText}>Configure themes or specific fixed dinners per day.</Text>
             </View>
           </View>
-          <Text style={styles.arrowIconText}>›</Text>
+          <Text style={[styles.arrowIconText, { color: COLORS.accentPurple }]}>›</Text>
         </TouchableOpacity>
       </View>
 
@@ -64,6 +79,10 @@ export default function SettingsScreen() {
       <ManageSidesModal 
         isOpen={isSidesModalOpen}
         onClose={() => setIsSidesModalOpen(false)}
+      />
+      <ManageCategoriesModal
+        isOpen={isCategoriesModalOpen}
+        onClose={() => setIsCategoriesModalOpen(false)}
       />
 
       <EditRulesModal isOpen={isRulesModalOpen} onClose={() => setIsRulesModalOpen(false)} />
@@ -78,6 +97,8 @@ const styles = StyleSheet.create({
   sectionHeaderTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textPrimary, marginBottom: 4, letterSpacing: -0.3 },
   sectionSubtitleText: { fontSize: 13, color: COLORS.textMuted, lineHeight: 18, marginBottom: 16 },
   settingsMenuCell: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.border, borderRadius: 10, padding: 12 },
+  categoriesMenuCell: { borderColor: 'rgba(10, 132, 255, 0.35)' },
+  rulesMenuCell: { borderColor: 'rgba(191, 90, 242, 0.35)' },
   cellLeftInfo: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   cellMainLabelText: { fontSize: 15, fontWeight: '600', color: COLORS.textPrimary },
   cellSubLabelText: { fontSize: 12, color: COLORS.textMuted, marginTop: 1 },
