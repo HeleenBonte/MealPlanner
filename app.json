@@ -34,7 +34,25 @@
           "imageWidth": 76
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "react-native-android-widget",
+        {
+          "widgets": [
+            {
+              "name": "MealPlannerWidget",
+              "label": "Meal Planner",
+              "description": "Today's and tomorrow's planned meals.",
+              "minWidth": "250dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 21600000
+            }
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
