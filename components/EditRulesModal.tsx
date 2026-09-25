@@ -1,10 +1,10 @@
 // components/EditRulesModal.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, ActivityIndicator, Alert, TextInput } from 'react-native';
+import { View, Text, StyleSheet, Modal, TouchableOpacity, ScrollView, ActivityIndicator, Alert, TextInput, Keyboard, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { globalStyles, COLORS } from '../styles/theme';
-import { fetchAllWeekdayRules, updateWeekdayRule, DBRule } from '../database/dbQueries';
+import { fetchAllWeekdayRules, fetchCategories, updateWeekdayRule, CategoryItem, DBRule } from '../database/dbQueries';
 
 interface EditRulesModalProps {
   isOpen: boolean;
@@ -22,13 +22,14 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
   const [activeEditingDay, setActiveEditingDay] = useState<number | null>(null);
   const [categoryInput, setCategoryInput] = useState('');
   const [fixedMealInput, setFixedMealInput] = useState('');
-
-  const categoriesPool = ['italian', 'traditional', 'fish', 'international'];
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
   const loadRules = useCallback(async () => {
     try {
       setIsLoading(true);
       let data = await fetchAllWeekdayRules(db);
+      const categoryData = await fetchCategories(db);
         if (data.length < 7) {
             console.log('Incomplete rules data, initializing defaults...');
             const fullWeekmap = [
@@ -55,6 +56,7 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
 
 
       setRules(data);
+      setCategories(categoryData);
     } catch (error) {
       console.error('Failed to load weekday configuration rules:', error);
     } finally {
@@ -69,6 +71,20 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
     }
   }, [isOpen, loadRules]);
 
+  useEffect(() => {
+    const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+      setIsKeyboardVisible(true);
+    });
+    const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
   const handleSelectDayToEdit = (rule: DBRule) => {
     setActiveEditingDay(rule.day_index);
     setCategoryInput(rule.required_category || '');
@@ -77,6 +93,7 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
 
   const handleSaveRuleUpdate = async (dayIndex: number) => {
     try {
+      Keyboard.dismiss();
       const finalCategory = categoryInput.trim().toLowerCase() || null;
       const finalFixedMeal = fixedMealInput.trim() || null;
 
@@ -95,6 +112,7 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
 
   const handleClearRule = async (dayIndex: number) => {
     try {
+      Keyboard.dismiss();
       await updateWeekdayRule(db, {
         day_index: dayIndex,
         required_category: null,
@@ -109,12 +127,16 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
 
   return (
     <Modal visible={isOpen} animationType="slide" transparent={true} onRequestClose={onClose}>
-      <View style={[styles.modalOverlay, { marginBottom: 60 + insets.bottom }]}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+      <View style={[styles.modalOverlay, { paddingBottom: isKeyboardVisible ? 0 : insets.bottom }]}>
         <View style={styles.modalContentCard}>
           
           <View style={styles.modalHeaderRow}>
             <Text style={styles.modalTitle}>Weekday Constraints</Text>
-            <TouchableOpacity onPress={onClose}>
+            <TouchableOpacity onPress={() => { Keyboard.dismiss(); onClose(); }}>
               <Text style={{ color: COLORS.textMuted, fontSize: 16, fontWeight: '600' }}>Done</Text>
             </TouchableOpacity>
           </View>
@@ -122,7 +144,11 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
           {isLoading ? (
             <View style={{ paddingVertical: 40 }}><ActivityIndicator size="small" color={COLORS.accentOrange} /></View>
           ) : (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}>
+            <ScrollView
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="always"
+              contentContainerStyle={{ flexGrow: 1, paddingBottom: 32 }}
+            >
               <Text style={styles.subtitleText}>Tap a day to set custom automated constraints or fixed recipe overrides.</Text>
               
               {rules.map((item) => {
@@ -147,16 +173,16 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
                         {/* Option A: Category Constraints selection buttons */}
                         <Text style={styles.fieldLabel}>Restrict to Category Tag</Text>
                         <View style={styles.badgeGrid}>
-                          {categoriesPool.map((cat) => (
+                          {categories.map((category) => (
                             <TouchableOpacity 
-                              key={cat} 
-                              style={[styles.badgeButton, categoryInput === cat && styles.activeBadgeButton]}
+                              key={category.name} 
+                              style={[styles.badgeButton, categoryInput === category.name && styles.activeBadgeButton]}
                               onPress={() => {
-                                setCategoryInput(categoryInput === cat ? '' : cat);
+                                setCategoryInput(categoryInput === category.name ? '' : category.name);
                                 setFixedMealInput(''); // Category toggles wipe fixed options to prevent query conflicts
                               }}
                             >
-                              <Text style={[styles.badgeText, categoryInput === cat && { color: COLORS.accentOrange }]}>{cat}</Text>
+                              <Text style={[styles.badgeText, categoryInput === category.name && { color: COLORS.accentOrange }]}>{category.name}</Text>
                             </TouchableOpacity>
                           ))}
                         </View>
@@ -172,6 +198,9 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
                             setFixedMealInput(val);
                             if (val.trim()) setCategoryInput(''); // Text overrides wipe category chips
                           }}
+                          returnKeyType="done"
+                          submitBehavior="submit"
+                          onSubmitEditing={() => handleSaveRuleUpdate(item.day_index)}
                         />
 
                         {/* Control Save & Clear Actions row */}
@@ -193,13 +222,14 @@ export default function EditRulesModal({ isOpen, onClose }: EditRulesModalProps)
           )}
         </View>
       </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
-  modalContentCard: { backgroundColor: COLORS.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 16,  borderWidth: 1, borderColor: COLORS.border, height: 550, width: '100%' },
+  modalContentCard: { backgroundColor: COLORS.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 16, paddingTop: 16, borderWidth: 1, borderColor: COLORS.border, maxHeight: '90%', width: '100%' },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingBottom: 12 },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: COLORS.textPrimary, letterSpacing: -0.5 },
   subtitleText: { fontSize: 13, color: COLORS.textSecondary, lineHeight: 18, marginBottom: 16 },
