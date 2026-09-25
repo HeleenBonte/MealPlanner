@@ -1,19 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Modal, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, Alert, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, StyleSheet, Modal, TextInput, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Keyboard, KeyboardAvoidingView, Platform } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 import { COLORS, globalStyles } from '../styles/theme';
-import { addNewMealToLibrary, fetchGlobalCarbs, fetchGlobalVegetables, GlobalSideItem } from '../database/dbQueries';
+import { addNewMealToLibrary, editMealInLibrary, fetchCategories, fetchGlobalCarbs, fetchGlobalVegetables, CategoryItem, EditMealPayload, GlobalSideItem } from '../database/dbQueries';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 interface AddMealModalProps {
     isOpen: boolean;
     onClose: () => void;
     onSaveSuccess: () => void;
+    mealToEdit?: EditMealPayload | null;
 }
 
-export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMealModalProps) {
+export default function AddMealModal({ isOpen, onClose, onSaveSuccess, mealToEdit = null }: AddMealModalProps) {
     const db = useSQLiteContext();
     const insets = useSafeAreaInsets();
+    const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
 
     const [mealName, setMealName] = useState('');
     const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
@@ -22,19 +24,24 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
 
     const [availableCarbs, setAvailableCarbs] = useState<GlobalSideItem[]>([]);
     const [availableVeggies, setAvailableVeggies] = useState<GlobalSideItem[]>([]);
+    const [availableCategories, setAvailableCategories] = useState<CategoryItem[]>([]);
     const [isLoadingPools, setIsLoadingPools] = useState(false);
-
-    const categoriesPool = ['italian', 'meat', 'fish', 'international'];
 
     useEffect(() => {
         if (isOpen) {
+            setMealName(mealToEdit?.name || '');
+            setSelectedCategory(mealToEdit?.category || null);
+            setSelectedCarbs(mealToEdit?.carbIds || []);
+            setSelectedVeggies(mealToEdit?.vegIds || []);
             async function loadReferencePools() {
             try {
                 setIsLoadingPools(true);
                 const carbs = await fetchGlobalCarbs(db);
                 const veggies = await fetchGlobalVegetables(db);
+                const categories = await fetchCategories(db);
                 setAvailableCarbs(carbs);
                 setAvailableVeggies(veggies);
+                setAvailableCategories(categories);
             }
             catch (error) {
                 console.error('Error fetching global items:', error);
@@ -45,7 +52,21 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
         }
         loadReferencePools();
     }
-    }, [isOpen, db]);
+    }, [isOpen, db, mealToEdit]);
+
+    useEffect(() => {
+        const showSubscription = Keyboard.addListener('keyboardDidShow', () => {
+            setIsKeyboardVisible(true);
+        });
+        const hideSubscription = Keyboard.addListener('keyboardDidHide', () => {
+            setIsKeyboardVisible(false);
+        });
+
+        return () => {
+            showSubscription.remove();
+            hideSubscription.remove();
+        };
+    }, []);
 
     const resetForm = () => {
         setMealName('');
@@ -61,13 +82,19 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
         }
 
         try {
-            await addNewMealToLibrary(db, 
-                { name: mealName.trim(),
-                    category: selectedCategory,
-                    carbIds: selectedCarbs.map(Number),
-                    vegIds: selectedVeggies.map(Number)
-                });
-            Alert.alert('Success', 'Meal added to library successfully.');
+            const payload = {
+                id: mealToEdit?.id || 0,
+                name: mealName.trim(),
+                category: selectedCategory,
+                carbIds: selectedCarbs.map(Number),
+                vegIds: selectedVeggies.map(Number),
+            };
+            if (mealToEdit) {
+                await editMealInLibrary(db, payload);
+            } else {
+                await addNewMealToLibrary(db, payload);
+            }
+            Alert.alert('Success', mealToEdit ? 'Meal updated successfully.' : 'Meal added to library successfully.');
             resetForm();
             onSaveSuccess();
         } catch (error) {
@@ -90,11 +117,11 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
         >
-      <View style={[styles.modalOverlay, { marginBottom: 60 +insets.bottom }]}>
+      <View style={[styles.modalOverlay, { paddingBottom: isKeyboardVisible ? 0 : insets.bottom }]}>
         <View style={styles.modalContentCard}>
           
           <View style={styles.modalHeaderRow}>
-            <Text style={styles.modalTitle}>New Meal</Text>
+            <Text style={styles.modalTitle}>{mealToEdit ? 'Edit Meal' : 'New Meal'}</Text>
             <TouchableOpacity onPress={() => { onClose(); resetForm(); }}>
               <Text style={{ color: COLORS.textMuted, fontSize: 16, fontWeight: '600' }}>Cancel</Text>
             </TouchableOpacity>
@@ -115,13 +142,13 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
 
               <Text style={styles.inputLabel}>Visual Category Badge</Text>
               <View style={styles.buttonGrid}>
-                {categoriesPool.map((cat) => (
+                {availableCategories.map((category) => (
                   <TouchableOpacity 
-                    key={cat} 
-                    style={[styles.selectButton, selectedCategory === cat && styles.activeButton]}
-                    onPress={() => setSelectedCategory(selectedCategory === cat ? null : cat)}
+                    key={category.name} 
+                    style={[styles.selectButton, selectedCategory === category.name && styles.activeCategoryButton]}
+                    onPress={() => setSelectedCategory(selectedCategory === category.name ? null : category.name)}
                   >
-                    <Text style={[styles.buttonText, selectedCategory === cat && { color: COLORS.accentOrange }]}>{cat}</Text>
+                    <Text style={[styles.buttonText, selectedCategory === category.name && { color: COLORS.accentBlue }]}>{category.name}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -131,10 +158,10 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
                 {availableCarbs.map((carb) => (
                   <TouchableOpacity 
                     key={carb.id} 
-                    style={[styles.selectButton, selectedCarbs.includes(carb.id) && styles.activeButton]}
+                    style={[styles.selectButton, selectedCarbs.includes(carb.id) && styles.activeCarbButton]}
                     onPress={() => toggleSelection(carb.id, selectedCarbs, setSelectedCarbs)}
                   >
-                    <Text style={[styles.buttonText, selectedCarbs.includes(carb.id) && { color: COLORS.accentOrange }]}>{carb.name}</Text>
+                    <Text style={[styles.buttonText, selectedCarbs.includes(carb.id) && { color: COLORS.accentGreen }]}>{carb.name}</Text>
                   </TouchableOpacity>
                 ))}
                 {availableCarbs.length === 0 && <Text style={styles.emptyText}>No carbs available. Add them in Settings! ⚙️</Text>}
@@ -145,17 +172,17 @@ export default function AddMealModal({ isOpen, onClose, onSaveSuccess }: AddMeal
                 {availableVeggies.map((veg) => (
                   <TouchableOpacity 
                     key={veg.id} 
-                    style={[styles.selectButton, selectedVeggies.includes(veg.id) && styles.activeButton]}
+                    style={[styles.selectButton, selectedVeggies.includes(veg.id) && styles.activeVegetableButton]}
                     onPress={() => toggleSelection(veg.id, selectedVeggies, setSelectedVeggies)}
                   >
-                    <Text style={[styles.buttonText, selectedVeggies.includes(veg.id) && { color: COLORS.accentOrange }]}>{veg.name}</Text>
+                    <Text style={[styles.buttonText, selectedVeggies.includes(veg.id) && { color: COLORS.accentPurple }]}>{veg.name}</Text>
                   </TouchableOpacity>
                 ))}
                 {availableVeggies.length === 0 && <Text style={styles.emptyText}>No veggies available. Add them in Settings! ⚙️</Text>}
               </View>
 
               <TouchableOpacity style={styles.saveButton} onPress={handleSave} activeOpacity={0.8}>
-                <Text style={styles.saveButtonText}>Save Recipe to Library</Text>
+                <Text style={styles.saveButtonText}>{mealToEdit ? 'Save Meal Changes' : 'Save Recipe to Library'}</Text>
               </TouchableOpacity>
             </ScrollView>
           )}
@@ -219,9 +246,9 @@ const styles = StyleSheet.create({
     borderRadius: 8, 
     paddingHorizontal: 12, 
     paddingVertical: 8 },
-  activeButton: { 
-    borderColor: COLORS.accentOrange, 
-    backgroundColor: 'rgba(255, 159, 10, 0.05)' },
+  activeCategoryButton: { borderColor: COLORS.accentBlue, backgroundColor: 'rgba(10, 132, 255, 0.08)' },
+  activeCarbButton: { borderColor: COLORS.accentGreen, backgroundColor: 'rgba(48, 209, 88, 0.08)' },
+  activeVegetableButton: { borderColor: COLORS.accentPurple, backgroundColor: 'rgba(191, 90, 242, 0.08)' },
   buttonText: { 
     color: COLORS.textSecondary, 
     fontSize: 14, fontWeight: '500', 
@@ -242,6 +269,3 @@ const styles = StyleSheet.create({
     fontStyle: 'italic', 
     paddingVertical: 4 }
 });
-
-
-
