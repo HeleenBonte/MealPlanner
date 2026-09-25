@@ -262,8 +262,7 @@ const styles = StyleSheet.create({
   },
   editIconText: {
     color: COLORS.accentBlue,
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 19,
   },
   deleteIconText: {
     fontSize: 14,

@@ -1,10 +1,12 @@
 // app/index.tsx
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Modal, ScrollView } from 'react-native';
 import { useIsFocused, useNavigation } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
-import { getCurrentWeekDates, getNextWeekDates, getTodayDateString } from '../utils/dateHelpers';
+import { getCurrentWeekDates, getNextWeekDates, getTodayDateString, getTomorrowDateString } from '../utils/dateHelpers';
 import { globalStyles, COLORS } from '../styles/theme';
+import { assignMealToSchedule, fetchAllMealsFromLibrary, LibraryMealRow } from '../database/dbQueries';
+import { updateMealPlannerWidget } from '../widgets/widgetRuntime';
 
 interface DisplayDay {
   date: string;
@@ -25,6 +27,9 @@ export default function WeekCalendarScreen() {
   const [nextWeekSchedule, setNextWeekSchedule] = useState<DisplayDay[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [mealPickerDate, setMealPickerDate] = useState<string | null>(null);
+  const [mealOptions, setMealOptions] = useState<LibraryMealRow[]>([]);
+  const [isLoadingMealOptions, setIsLoadingMealOptions] = useState(false);
 
   // Core database fetch timeline router query
   const loadSchedules = useCallback(async () => {
@@ -47,6 +52,19 @@ export default function WeekCalendarScreen() {
         `SELECT date, widget_display_string FROM scheduled_days WHERE date IN (${nextPlaceholders});`,
         nextWeekDates
       );
+
+      const widgetDates = [getTodayDateString(), getTomorrowDateString()];
+      const widgetPlaceholders = widgetDates.map(() => '?').join(',');
+      const widgetRows = await db.getAllAsync<{ date: string; widget_display_string: string | null }>(
+        `SELECT date, widget_display_string FROM scheduled_days WHERE date IN (${widgetPlaceholders});`,
+        widgetDates
+      );
+      const widgetMeal = (date: string, emptyText: string) =>
+        widgetRows.find(row => row.date === date)?.widget_display_string || emptyText;
+      await updateMealPlannerWidget({
+        today: widgetMeal(widgetDates[0], 'Not planned'),
+        tomorrow: widgetMeal(widgetDates[1], 'Not planned'),
+      });
 
       // Map Current Week values safely
       const compiledCurrent = currentWeekDates.map(dateStr => {
@@ -100,6 +118,32 @@ export default function WeekCalendarScreen() {
       await loadSchedules();
     } catch (error: any) {
       Alert.alert('Shuffle Error', error.message);
+    }
+  };
+
+  const handleOpenMealPicker = async (dateStr: string) => {
+    try {
+      setIsLoadingMealOptions(true);
+      setMealPickerDate(dateStr);
+      setMealOptions(await fetchAllMealsFromLibrary(db));
+    } catch (error) {
+      console.error('Failed to load meal options:', error);
+      Alert.alert('Meal Picker Error', 'Could not load meals from the library.');
+      setMealPickerDate(null);
+    } finally {
+      setIsLoadingMealOptions(false);
+    }
+  };
+
+  const handleSelectMeal = async (mealId: number) => {
+    if (!mealPickerDate) return;
+
+    try {
+      await assignMealToSchedule(db, mealPickerDate, mealId);
+      setMealPickerDate(null);
+      await loadSchedules();
+    } catch (error: any) {
+      Alert.alert('Meal Selection Error', error.message || 'Could not assign the meal.');
     }
   };
 
@@ -177,13 +221,55 @@ export default function WeekCalendarScreen() {
             </View>
             <View style={styles.cardBodyRow}>
               <Text style={[styles.mealText, activeTab === 'next' && { fontStyle: 'italic' }]}>{item.mealText}</Text>
-              <TouchableOpacity style={styles.shuffleButton} onPress={() => handleReRollSingleDay(item.date)}>
-                <Text style={styles.shuffleIcon}>🔄</Text>
-              </TouchableOpacity>
+              <View style={styles.cardActions}>
+                <TouchableOpacity style={styles.shuffleButton} onPress={() => handleReRollSingleDay(item.date)}>
+                  <Text style={styles.shuffleIcon}>↻</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.pickButton} onPress={() => handleOpenMealPicker(item.date)}>
+                  <Text style={styles.pickIcon}>✎</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         )}
       />
+
+      <Modal
+        visible={mealPickerDate !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setMealPickerDate(null)}
+      >
+        <View style={styles.pickerOverlay}>
+          <View style={styles.pickerCard}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Choose Meal</Text>
+              <TouchableOpacity onPress={() => setMealPickerDate(null)}>
+                <Text style={styles.pickerCloseText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+            {isLoadingMealOptions ? (
+              <ActivityIndicator size="small" color={COLORS.accentBlue} />
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false}>
+                {mealOptions.map(meal => (
+                  <TouchableOpacity
+                    key={meal.id}
+                    style={styles.mealOption}
+                    onPress={() => handleSelectMeal(meal.id)}
+                  >
+                    <Text style={styles.mealOptionName}>{meal.name}</Text>
+                    {meal.category && <Text style={styles.mealOptionCategory}>{meal.category}</Text>}
+                  </TouchableOpacity>
+                ))}
+                {mealOptions.length === 0 && (
+                  <Text style={styles.emptyPickerText}>No meals are available in the library.</Text>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
 
     </View>
   );
@@ -206,6 +292,18 @@ const styles = StyleSheet.create({
   dateLabelText: { fontSize: 12, color: COLORS.textMuted, fontFamily: 'monospace' },
   cardBodyRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   mealText: { fontSize: 14, fontWeight: '500', color: COLORS.textSecondary, flex: 1, paddingRight: 8, lineHeight: 18 },
-  shuffleButton: { backgroundColor: COLORS.surfaceHover, borderRadius: 6, width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border },
-  shuffleIcon: { fontSize: 13, color: COLORS.accentOrange }
+  shuffleButton: { backgroundColor: COLORS.surfaceHover, borderRadius: 6, width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: COLORS.border },
+  shuffleIcon: { fontSize: 19, color: COLORS.accentOrange},
+  cardActions: { flexDirection: 'row', gap: 6 },
+  pickButton: { backgroundColor: 'rgba(10, 132, 255, 0.1)', borderRadius: 6, width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  pickIcon: { fontSize: 19, color: COLORS.accentBlue },
+  pickerOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' },
+  pickerCard: { backgroundColor: COLORS.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, maxHeight: '80%', borderWidth: 1, borderColor: COLORS.border },
+  pickerHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingBottom: 12, marginBottom: 12 },
+  pickerTitle: { fontSize: 18, fontWeight: '700', color: COLORS.textPrimary },
+  pickerCloseText: { color: COLORS.textMuted, fontSize: 16, fontWeight: '600' },
+  mealOption: { backgroundColor: COLORS.background, borderWidth: 1, borderColor: COLORS.border, borderRadius: 8, padding: 12, marginBottom: 8 },
+  mealOptionName: { color: COLORS.textPrimary, fontSize: 15, fontWeight: '600' },
+  mealOptionCategory: { color: COLORS.accentBlue, fontSize: 12, marginTop: 3, textTransform: 'capitalize' },
+  emptyPickerText: { color: COLORS.textMuted, fontSize: 14, paddingVertical: 16, textAlign: 'center' }
 });

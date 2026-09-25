@@ -39,6 +39,12 @@ export function getTodayDateString(): string {
     return formatLocalDate(new Date());
 }
 
+export function getTomorrowDateString(): string {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return formatLocalDate(tomorrow);
+}
+
 function parseLocalDate(dateString: string): Date {
     const [year, month, day] = dateString.split('-').map(Number);
     return new Date(year, month - 1, day);

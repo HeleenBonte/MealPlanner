@@ -8,7 +8,7 @@ export interface ScheduledDay {
     widget_display_string: string;
 }
 
-interface DBMeal {
+export interface MealOption {
     id: number;
     name: string;
     category: string | null;
@@ -74,9 +74,14 @@ export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: str
         const rules = await db.getAllAsync<DBRule>('SELECT * FROM weekday_rules ORDER BY day_index ASC;');
 
         const chosenMealIdsThisSession: number[] = [];
+        for (const targetDate of startDates) {
+            const previousMealId = await releaseScheduledMealForDate(db, targetDate);
+            if (previousMealId !== null) {
+                chosenMealIdsThisSession.push(previousMealId);
+            }
+        }
 
         for (const targetDate of startDates) {
-
             const currentDayIndex = getWeekdayIndex(targetDate);
 
             const dayRule = rules.find(r => r.day_index === currentDayIndex);
@@ -92,13 +97,14 @@ export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: str
                 }
             }
 
-            let candidateMeals = await getCandidateMeals(db, targetDate, dayRule, chosenMealIdsThisSession);
+            const candidateResult = await getCandidateMeals(db, targetDate, dayRule, chosenMealIdsThisSession);
+            const candidateMeals = candidateResult.meals;
 
             if (candidateMeals.length === 0) {
                 await db.runAsync(
                     `INSERT OR REPLACE INTO scheduled_days (date, meal_id, selected_carb, selected_veg, widget_display_string) 
-                    VALUES (?, NULL, NULL, NULL, 'No meal available');`,
-                    [targetDate, 'No Meals Found (Add more to Library)']
+                    VALUES (?, NULL, NULL, NULL, ?);`,
+                    [targetDate, 'No meal available']
                 );
                 continue;
             }
@@ -110,15 +116,52 @@ export async function generateWeeklySchedule(db: SQLiteDatabase, startDates: str
             const chosenCarb = await selectRandomCarb(db, selectedMeal.id);
             const chosenVeg = await selectRandomVegetable(db, selectedMeal.id);
 
-            const displayString = compileWidgetDisplayString(selectedMeal.name, chosenCarb, chosenVeg);
+            const mealDisplayString = compileWidgetDisplayString(selectedMeal.name, chosenCarb, chosenVeg);
+            const displayString = candidateResult.usedFallback
+                ? `No meal available, suggested meal: ${mealDisplayString}`
+                : mealDisplayString;
 
             await db.runAsync(
                 `INSERT OR REPLACE INTO scheduled_days (date, meal_id, selected_carb, selected_veg, widget_display_string) 
                 VALUES (?, ?, ?, ?, ?);`,
                 [targetDate, selectedMeal.id, chosenCarb, chosenVeg, displayString]
             );
+            await db.runAsync(
+                `UPDATE meals SET last_cooked = ? WHERE id = ?;`,
+                [targetDate, selectedMeal.id]
+            );
         }
     });
+}
+
+async function releaseScheduledMealForDate(db: SQLiteDatabase, targetDate: string): Promise<number | null> {
+    const scheduledDay = await db.getFirstAsync<{ meal_id: number | null }>(
+        `SELECT meal_id FROM scheduled_days WHERE date = ?;`,
+        [targetDate]
+    );
+
+    if (!scheduledDay?.meal_id || scheduledDay.meal_id < 1) {
+        return null;
+    }
+
+    await db.runAsync(
+        `UPDATE meals
+         SET last_cooked = NULL
+         WHERE id = ?
+           AND NOT EXISTS (
+               SELECT 1
+               FROM scheduled_days
+               WHERE meal_id = ?
+                 AND date != ?
+           );`,
+        [scheduledDay.meal_id, scheduledDay.meal_id, targetDate]
+    );
+    await db.runAsync(
+        `DELETE FROM scheduled_days WHERE date = ?;`,
+        [targetDate]
+    );
+
+    return scheduledDay.meal_id;
 }
 
 async function clearOldSchedules(db: SQLiteDatabase): Promise<void> {
@@ -129,42 +172,86 @@ async function clearOldSchedules(db: SQLiteDatabase): Promise<void> {
     }
 }
 
-async function getCandidateMeals(db: SQLiteDatabase, targetDate: string, dayRule: DBRule | undefined, chosenMealIdsThisSession: number[]): Promise<DBMeal[]> {
+interface CandidateMealsResult {
+    meals: MealOption[];
+    usedFallback: boolean;
+}
+
+async function getCandidateMeals(
+    db: SQLiteDatabase,
+    targetDate: string,
+    dayRule: DBRule | undefined,
+    chosenMealIdsThisSession: number[]
+): Promise<CandidateMealsResult> {
 
     let baseQuery = `
             SELECT id, name, category FROM meals 
-            WHERE (last_cooked IS NULL OR last_cooked < date(?, '-14 days'))
+            WHERE (
+                last_cooked IS NULL
+                OR last_cooked < date(?, '-14 days')
+                OR last_cooked > date(?, '+14 days')
+            )
+            AND NOT EXISTS (
+                SELECT 1
+                FROM scheduled_days scheduled
+                WHERE scheduled.meal_id = meals.id
+                  AND scheduled.date != ?
+            )
             `;
 
-    const queryParams: any[] = [targetDate];
+    const queryParams: any[] = [targetDate, targetDate, targetDate];
 
     if (dayRule && dayRule.required_category) {
         baseQuery += ` AND category = ?`;
         queryParams.push(dayRule.required_category);
     }
 
-    const queryResults = await db.getAllAsync<DBMeal>(baseQuery, queryParams);
+    const queryResults = await db.getAllAsync<MealOption>(baseQuery, queryParams);
 
-    let candidateMeals = queryResults.filter(meal => !chosenMealIdsThisSession.includes(meal.id));
+    const candidateMeals = queryResults.filter(meal => !chosenMealIdsThisSession.includes(meal.id));
 
-    if (candidateMeals.length === 0) {
-        let fallbackQuery = `SELECT id, name, category FROM meals`;
-        const fallbackParams: any[] = [];
-
-        if (dayRule && dayRule.required_category) {
-            fallbackQuery += ` WHERE category = ?`;
-            fallbackParams.push(dayRule.required_category);
-        }
-
-        const fallbackResults = await db.getAllAsync<DBMeal>(fallbackQuery, fallbackParams);
-        candidateMeals = fallbackResults.filter(meal => !chosenMealIdsThisSession.includes(meal.id));
+    if (candidateMeals.length > 0) {
+        return { meals: candidateMeals, usedFallback: false };
     }
 
+    let fallbackQuery = `
+        SELECT id, name, category
+        FROM meals
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM scheduled_days scheduled
+            WHERE scheduled.meal_id = meals.id
+              AND scheduled.date != ?
+        )
+    `;
+    const fallbackParams: any[] = [targetDate];
 
-    return candidateMeals;
+    if (dayRule && dayRule.required_category) {
+        fallbackQuery += ` AND category = ?`;
+        fallbackParams.push(dayRule.required_category);
+    }
+
+    const fallbackResults = await db.getAllAsync<MealOption>(fallbackQuery, fallbackParams);
+    const fallbackMeals = fallbackResults.filter(meal => !chosenMealIdsThisSession.includes(meal.id));
+    if (fallbackMeals.length > 0) {
+        return { meals: fallbackMeals, usedFallback: true };
+    }
+
+    let suggestionQuery = `SELECT id, name, category FROM meals`;
+    const suggestionParams: any[] = [];
+    if (dayRule?.required_category) {
+        suggestionQuery += ` WHERE category = ?`;
+        suggestionParams.push(dayRule.required_category);
+    }
+    const suggestionResults = await db.getAllAsync<MealOption>(suggestionQuery, suggestionParams);
+    const suggestionMeals = suggestionResults.filter(meal => !chosenMealIdsThisSession.includes(meal.id));
+    return {
+        meals: suggestionMeals,
+        usedFallback: true,
+    };
 }
 
-function selectRandomMeal(meals: DBMeal[]): DBMeal {
+function selectRandomMeal(meals: MealOption[]): MealOption {
     const randomIndex = Math.floor(Math.random() * meals.length);
     return meals[randomIndex];
 }
@@ -401,8 +488,44 @@ export async function fetchAllMealsFromLibrary(db: SQLiteDatabase): Promise<Libr
     );
 }
 
+export async function assignMealToSchedule(
+    db: SQLiteDatabase,
+    targetDate: string,
+    mealId: number
+): Promise<void> {
+    await db.withTransactionAsync(async () => {
+        await releaseScheduledMealForDate(db, targetDate);
+
+        const meal = await db.getFirstAsync<MealOption>(
+            `SELECT id, name, category FROM meals WHERE id = ?;`,
+            [mealId]
+        );
+        if (!meal) {
+            throw new Error('The selected meal could not be found.');
+        }
+
+        const chosenCarb = await selectRandomCarb(db, meal.id);
+        const chosenVeg = await selectRandomVegetable(db, meal.id);
+        const displayString = compileWidgetDisplayString(meal.name, chosenCarb, chosenVeg);
+
+        await db.runAsync(
+            `INSERT OR REPLACE INTO scheduled_days
+             (date, meal_id, selected_carb, selected_veg, widget_display_string)
+             VALUES (?, ?, ?, ?, ?);`,
+            [targetDate, meal.id, chosenCarb, chosenVeg, displayString]
+        );
+        await db.runAsync(
+            `UPDATE meals SET last_cooked = ? WHERE id = ?;`,
+            [targetDate, meal.id]
+        );
+    });
+}
+
 export async function deleteMealFromLibrary(db: SQLiteDatabase, mealId: number): Promise<void> {
-    await db.runAsync(`DELETE FROM meals WHERE id = ?;`, [mealId]);
+    await db.withTransactionAsync(async () => {
+        await db.runAsync(`DELETE FROM scheduled_days WHERE meal_id = ?;`, [mealId]);
+        await db.runAsync(`DELETE FROM meals WHERE id = ?;`, [mealId]);
+    });
 }
 
 export async function fetchAllWeekdayRules(db: SQLiteDatabase): Promise<DBRule[]> {
