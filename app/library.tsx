@@ -1,20 +1,22 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
-import { useIsFocused } from 'expo-router';
+import { useIsFocused, useNavigation } from 'expo-router';
 import { useSQLiteContext } from 'expo-sqlite';
 import { globalStyles, COLORS } from '../styles/theme';
 
-import { fetchAllMealsFromLibrary, deleteMealFromLibrary, LibraryMealRow } from '../database/dbQueries';
+import { fetchAllMealsFromLibrary, fetchMealForEdit, deleteMealFromLibrary, EditMealPayload, LibraryMealRow } from '../database/dbQueries';
 
 import AddMealModal from '../components/AddMealModal';
 
 export default function LibraryScreen() {
     const db = useSQLiteContext();
     const isFocused = useIsFocused(); 
+    const navigation = useNavigation();
 
     const [meals, setMeals] = useState<LibraryMealRow[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [mealToEdit, setMealToEdit] = useState<EditMealPayload | null>(null);
 
     const loadMeals = useCallback(async () => {
         try {
@@ -34,6 +36,23 @@ export default function LibraryScreen() {
             loadMeals();
         }
     }, [isFocused, loadMeals]);
+
+    useEffect(() => {
+        navigation.setOptions({
+            headerRight: () => (
+                <TouchableOpacity
+                    style={styles.headerAddButton}
+                    onPress={() => {
+                        setMealToEdit(null);
+                        setIsModalOpen(true);
+                    }}
+                    activeOpacity={0.8}
+                >
+                    <Text style={styles.headerAddButtonText}>+ Meal</Text>
+                </TouchableOpacity>
+            ),
+        });
+    }, [navigation]);
 
     const handleDeleteMeal = async (mealId: number, mealName: string) => {
         Alert.alert(
@@ -56,6 +75,21 @@ export default function LibraryScreen() {
                 }
             ]
         );
+    };
+
+    const handleEditMeal = async (mealId: number) => {
+        try {
+            const meal = await fetchMealForEdit(db, mealId);
+            if (!meal) {
+                Alert.alert('Error', 'Could not load this meal for editing.');
+                return;
+            }
+            setMealToEdit(meal);
+            setIsModalOpen(true);
+        } catch (error) {
+            console.error('Error loading meal for editing:', error);
+            Alert.alert('Error', 'Could not load this meal for editing.');
+        }
     };
 
 
@@ -85,15 +119,6 @@ export default function LibraryScreen() {
 
     return (
   <View style={styles.container}>
-      <View style={styles.headerActionRow}>
-        <Text style={globalStyles.headerTitle}>Recipe Library</Text>
-        
-        {/* We will wire this button up to open our Add Meal overlay panel form next! */}
-        <TouchableOpacity style={styles.addButton} onPress={() => setIsModalOpen(true)} activeOpacity={0.8}>
-          <Text style={styles.addButtonText}>+ Add Meal</Text>
-        </TouchableOpacity>
-      </View>
-
       <FlatList
         data={meals}
         keyExtractor={(item) => String(item.id)}
@@ -119,14 +144,22 @@ export default function LibraryScreen() {
                 ) : null}
               </View>
 
-              {/* Delete Trash Anchor Button */}
-              <TouchableOpacity 
-                style={styles.deleteButton} 
-                onPress={() => handleDeleteMeal(item.id, item.name)}
-                activeOpacity={0.6}
-              >
-                <Text style={styles.deleteIconText}>🗑️</Text>
-              </TouchableOpacity>
+              <View style={styles.cardActions}>
+                <TouchableOpacity
+                  style={styles.editButton}
+                  onPress={() => handleEditMeal(item.id)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.editIconText}>✎</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => handleDeleteMeal(item.id, item.name)}
+                  activeOpacity={0.6}
+                >
+                  <Text style={styles.deleteIconText}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Relational Side Dish Item Metadata Chip Layers */}
@@ -139,12 +172,16 @@ export default function LibraryScreen() {
       />
       <AddMealModal
       isOpen={isModalOpen}
-      onClose={() => setIsModalOpen(false)}
+      onClose={() => {
+        setMealToEdit(null);
+        setIsModalOpen(false);
+      }}
+      mealToEdit={mealToEdit}
       onSaveSuccess={() => {
         setIsModalOpen(false);
-                loadMeals();
-
-      }} // Refresh the library after adding a new meal
+        setMealToEdit(null);
+        loadMeals();
+      }}
     />
     </View>
   );
@@ -156,22 +193,16 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.background,
     paddingTop: 8,
   },
-  headerActionRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingRight: 16,
-    marginBottom: 8,
-  },
-  addButton: {
+  headerAddButton: {
     backgroundColor: COLORS.surfaceHover,
     borderWidth: 1,
     borderColor: COLORS.accentOrange,
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 6,
+    marginRight: 12,
   },
-  addButtonText: {
+  headerAddButtonText: {
     color: COLORS.accentOrange,
     fontSize: 14,
     fontWeight: '700',
@@ -216,6 +247,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255, 59, 48, 0.1)', // Subtle deep transparent red hue
+  },
+  cardActions: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  editButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(10, 132, 255, 0.1)',
+  },
+  editIconText: {
+    color: COLORS.accentBlue,
+    fontSize: 18,
+    fontWeight: '700',
   },
   deleteIconText: {
     fontSize: 14,
@@ -267,8 +315,5 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
-
-
-
 
 
