@@ -1,9 +1,52 @@
 import React from 'react';
 import { Tabs } from 'expo-router'; // Native Expo Router file-based tab engine
 import { SQLiteProvider } from 'expo-sqlite';
-import { StatusBar, Text } from 'react-native';
+import { StatusBar, StyleSheet, View, type ColorValue } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { initializeDatabase } from '../database/dbInit';
+
+type TabIconProps = { color: ColorValue };
+
+function CalendarIcon({ color }: TabIconProps) {
+  return (
+    <View style={styles.tabIcon}>
+      <View style={[styles.calendarBody, { borderColor: color }]}>
+        <View style={[styles.calendarHeader, { backgroundColor: color }]} />
+        <View style={[styles.calendarDot, styles.calendarDotLeft, { backgroundColor: color }]} />
+        <View style={[styles.calendarDot, styles.calendarDotRight, { backgroundColor: color }]} />
+      </View>
+      <View style={[styles.calendarRing, styles.calendarRingLeft, { backgroundColor: color }]} />
+      <View style={[styles.calendarRing, styles.calendarRingRight, { backgroundColor: color }]} />
+    </View>
+  );
+}
+
+function MealIcon({ color }: TabIconProps) {
+  return (
+    <View style={styles.tabIcon}>
+      <View style={[styles.clocheDome, { borderColor: color }]} />
+      <View style={[styles.clocheHandle, { backgroundColor: color }]} />
+      <View style={[styles.clocheBase, { backgroundColor: color }]} />
+    </View>
+  );
+}
+
+function GearIcon({ color }: TabIconProps) {
+  return (
+    <View style={styles.gearIcon}>
+      {Array.from({ length: 8 }, (_, index) => (
+        <View
+          key={index}
+          style={[
+            styles.gearTooth,
+            { backgroundColor: color, transform: [{ rotate: `${index * 45}deg` }] },
+          ]}
+        />
+      ))}
+      <View style={[styles.gearCenter, { backgroundColor: color }]} />
+    </View>
+  );
+}
 
 /**
  * Root Layout Orchestrator.
@@ -59,10 +102,7 @@ export default function RootLayout() {
           name="index"
           options={{
             title: 'This Week',
-            // Simple visual anchor emojis used until custom SVG icons are linked
-            tabBarIcon: ({ focused }) => (
-              <Text style={{ fontSize: 18 }}>{focused ? '📅' : '📆'}</Text>
-            ),
+            tabBarIcon: ({ color }) => <CalendarIcon color={color} />,
           }}
         />
 
@@ -71,9 +111,7 @@ export default function RootLayout() {
           name="library"
           options={{
             title: 'Meal Library',
-            tabBarIcon: () => (
-              <Text style={{ fontSize: 18 }}>🍳</Text>
-            ),
+            tabBarIcon: ({ color }) => <MealIcon color={color} />,
           }}
         />
 
@@ -82,8 +120,8 @@ export default function RootLayout() {
           name="settings"
           options={{
             title: 'Settings',
-            tabBarIcon: () => (
-              <Text style={{ fontSize: 18 }}>⚙️</Text>
+            tabBarIcon: ({ color }) => (
+              <GearIcon color={color} />
             ),
           }}
         />
@@ -92,3 +130,92 @@ export default function RootLayout() {
     </SQLiteProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  tabIcon: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarBody: {
+    width: 18,
+    height: 17,
+    borderWidth: 2,
+    borderRadius: 4,
+    marginTop: 3,
+  },
+  calendarHeader: {
+    height: 3,
+    marginTop: 3,
+    marginHorizontal: 2,
+    borderRadius: 2,
+  },
+  calendarRing: {
+    position: 'absolute',
+    top: 1,
+    width: 2,
+    height: 6,
+    borderRadius: 1,
+  },
+  calendarRingLeft: {
+    left: 6,
+  },
+  calendarRingRight: {
+    right: 6,
+  },
+  calendarDot: {
+    position: 'absolute',
+    top: 9,
+    width: 3,
+    height: 3,
+    borderRadius: 2,
+  },
+  calendarDotLeft: {
+    left: 4,
+  },
+  calendarDotRight: {
+    right: 4,
+  },
+  clocheDome: {
+    position: 'absolute',
+    top: 5,
+    width: 18,
+    height: 12,
+    borderWidth: 2,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+  },
+  clocheHandle: {
+    position: 'absolute',
+    top: 2,
+    width: 6,
+    height: 3,
+    borderRadius: 3,
+  },
+  clocheBase: {
+    position: 'absolute',
+    bottom: 5,
+    width: 23,
+    height: 2,
+    borderRadius: 1,
+  },
+  gearIcon: {
+    width: 22,
+    height: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gearTooth: {
+    position: 'absolute',
+    width: 4,
+    height: 20,
+    borderRadius: 2,
+  },
+  gearCenter: {
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+  },
+});
